@@ -63,6 +63,8 @@ namespace dp {
         }
 
         [[nodiscard]] std::optional<T> steal() {
+            // steal from back
+            // return pop_back();
             std::scoped_lock lock(mutex_);
             if (data_.empty()) return std::nullopt;
 
@@ -72,17 +74,21 @@ namespace dp {
         }
 
         void rotate_to_front(const T& item) {
+            // find item and move it to front
             std::scoped_lock lock(mutex_);
             auto iter = std::find(data_.begin(), data_.end(), item);
 
             if (iter != data_.end()) {
-                std::ignore = data_.erase(iter);
+                // inline constexpr detail::ignore_t ignore;
+                // std::ignore 是一个变量, `void operator=(T&& t) const noexcept {}
+                std::ignore = data_.erase(iter);  // return iterator but ignore it
             }
 
             data_.push_front(item);
         }
 
         [[nodiscard]] std::optional<T> copy_front_and_rotate_to_back() {
+            // move front to back
             std::scoped_lock lock(mutex_);
 
             if (data_.empty()) return std::nullopt;

@@ -47,6 +47,7 @@ namespace dp {
                             tasks_[id].signal.acquire();
 
                             do {
+                                // 从tasks_[id]的任务队列的front取任务执行
                                 // invoke the task
                                 while (auto task = tasks_[id].tasks.pop_front()) {
                                     try {
@@ -55,7 +56,9 @@ namespace dp {
                                     } catch (...) {
                                     }
                                 }
-
+                                // 从tasks_[id]的下一个task到前一个task的任务队列尾，偷任务执行
+                                // 比如id=5, tasks_.size()=8，那就从6，7，0，1，2，3，4从偷任务
+                                // 这里有点小问题(也不能说是一个问题，只是这个实现很奇怪), 如果steal 6 然后break，下一轮当前线程的队列还是没有任务，那么还会steal 6
                                 // try to steal a task
                                 for (std::size_t j = 1; j < tasks_.size(); ++j) {
                                     const std::size_t index = (id + j) % tasks_.size();
@@ -77,7 +80,7 @@ namespace dp {
                     // increment the thread id
                     ++current_id;
 
-                } catch (...) {
+                } catch (...) { // 可能是创建thread分配内存异常
                     // catch all
 
                     // remove one item from the tasks
@@ -205,18 +208,27 @@ namespace dp {
             auto i = *(i_opt);
             pending_tasks_.fetch_add(1, std::memory_order_relaxed);
             tasks_[i].tasks.push_back(std::forward<Function>(f));
+            // 这里视乎也有小问题,每push一个task就release一次,但是线程只会在当前队列没用任务且steal的时候才acquire一次
+            // 虽然是binary_semaphore，但是测试发现如果release多次，就可以acquire多次
+            // 这样导致，如果被release了多次后，如果队列没有任务且steal失败后，还是可以acquire成功
+            // https://stackoverflow.com/questions/75556262/c20-binary-semaphore-goes-over-max
             tasks_[i].signal.release();
         }
 
         struct task_item {
             dp::thread_safe_queue<FunctionType> tasks{};
+            // 当signal为0时线程等待
+            // 相当于完成 std::unique_lock lk(mtx); cv.wait(lk, [] { return !thread_safe_queue.empty(); });
             std::binary_semaphore signal{0};
         };
 
-        std::vector<ThreadType> threads_;
-        std::deque<task_item> tasks_;
+        std::vector<ThreadType> threads_;  // 线程池里的线程
+        std::deque<task_item> tasks_;  // 线程池里的线程对应的任务队列, 但这里并没用用到dequeue的特性，用std::vector应该也可以
+        // push进来的任务给哪个线程的队列: thread_id = priority_queue_.front()
+        // 什么时候priority_queue会发生变化: 当一个线程执行完自己队列中的任务，并且steal完其他队列的任务，priority_queue_.rotate_to_front(thread_id);
+        // 相当于将任务优先放到那些刚执行完一轮任务(while(my_task) + while(steal_task)的线程的任务队列中
         dp::thread_safe_queue<std::size_t> priority_queue_;
-        std::atomic_int_fast64_t pending_tasks_{};
+        std::atomic_int_fast64_t pending_tasks_{};  // 记录总的任务数, 线程取出任务后减1,线程池增加任务后加1
     };
 
     /**
