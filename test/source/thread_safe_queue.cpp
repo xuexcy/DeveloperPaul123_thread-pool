@@ -8,7 +8,7 @@
 TEST_CASE("Ensure insert and pop works with thread contention") {
     // create a synchronization barrier to ensure our threads have started before executing code to
     // access the queue
-    std::barrier barrier(3);
+    std::barrier barrier(3);  // 通过barrier让队列尽可能同时push_front
     std::promise<int> p1, p2, p3;
     {
         // initialize the queue
